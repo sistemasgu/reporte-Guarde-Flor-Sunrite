@@ -4,8 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Reporte Flor de Guarde SRF</title>
-<link rel="/wp-content/favicon.png"/>
-<link rel="icon" href="/wp-content/favicon.png" type="image/png"/>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -90,6 +88,7 @@ const fmt=n=>Number(n).toLocaleString('es-EC',{maximumFractionDigits:1});
 const PAL=['#B5174E','#0F766E','#D98E04','#4B3FA6','#2F7D32','#C2410C','#0E7490','#7C3A5E','#64748B','#9D174D','#15803D','#A16207'];
 let ALL=[],H=[],D=null,M=[],K=[],F={},S={q:'',from:'',to:'',m:'__n',g1:'',g2:''},SORT={c:null,d:1},LIM=100,CH={};
 
+const LS='guarde_srf_datos_v1';
 const iso=v=>{if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v)};
 const num=v=>{if(typeof v==='number')return v;const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?null:n};
 
@@ -97,22 +96,31 @@ function read(file){
  const r=new FileReader();
  r.onload=e=>{try{
   const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
-  const ws=wb.Sheets['General']||wb.Sheets[wb.SheetNames[0]];
+  const sn=wb.Sheets['General']?'General':wb.SheetNames[0];const ws=wb.Sheets[sn];
+  let mr=0,mc=0;for(const k in ws){if(k[0]==='!')continue;const a=XLSX.utils.decode_cell(k);if(a.r>mr)mr=a.r;if(a.c>mc)mc=a.c}
+  ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:mr,c:mc}});
+  const lb=file.name+' · hoja '+sn+' · '+Math.round(file.size/1024)+' KB';
   ALL=XLSX.utils.sheet_to_json(ws,{defval:'',raw:true});
   if(!ALL.length)throw new Error('La hoja no tiene filas');
-  init(file.name);
+  ALL.forEach(r=>{for(const k in r)if(r[k] instanceof Date)r[k]=iso(r[k])});
+  try{localStorage.removeItem(LS);localStorage.setItem(LS,JSON.stringify({name:lb,rows:ALL}))}catch(_){}
+  init(lb);
  }catch(x){alert('No se pudo leer el archivo: '+x.message)}};
  r.readAsArrayBuffer(file);
 }
 
 function init(name){
  H=Object.keys(ALL[0]);
+ const FC=H.find(h=>/^finca$/i.test(h));
+ if(FC){const mp={GR:'GRIMP',GI:'TERRAFRUT',LA:'TERRAFRUT',GU:'GUAISA',SE:'GUAISA',ID:'GUAISA',DL:'GUAISA'};
+  ALL.forEach(r=>r.Postcosecha=mp[String(r[FC]).trim().toUpperCase()]||'Sin asignar');
+  H.splice(H.indexOf(FC)+1,0,'Postcosecha')}
  D=H.find(h=>/fecha/i.test(h))||null;
  M=H.filter(h=>/mallas|tallos|cantidad|ramos/i.test(h)&&ALL.filter(r=>num(r[h])!==null).length>ALL.length*.7);
  ALL.forEach(r=>{M.forEach(m=>r[m]=num(r[m])||0);if(D)r[D]=iso(r[D]).slice(0,10);H.forEach(h=>{if(r[h] instanceof Date)r[h]=iso(r[h])})});
  K=H.filter(h=>h!==D&&!M.includes(h)&&!/hora/i.test(h)&&(u=>u>=2&&u<=60)(new Set(ALL.map(r=>r[h])).size));
  F={};K.forEach(k=>F[k]=new Set());
- S={q:'',from:'',to:'',m:M.includes('Tallos')?'Tallos':(M[0]||'__n'),g1:K.includes('Variedad')?'Variedad':K[0],g2:K.includes('Finca')?'Finca':(K[1]||K[0])};
+ S={q:'',from:'',to:'',m:M.includes('Tallos')?'Tallos':(M[0]||'__n'),g1:K.includes('Variedad')?'Variedad':K[0],g2:K.includes('Postcosecha')?'Postcosecha':(K.includes('Finca')?'Finca':(K[1]||K[0]))};
  LIM=100;SORT={c:null,d:1};
  $('#sub').textContent=name+' · '+fmt(ALL.length)+' registros';
  $('#drop').hidden=true;$('#app').hidden=false;
@@ -144,6 +152,13 @@ const val=r=>S.m==='__n'?1:r[S.m];
 const agg=(rs,key)=>{const m=new Map();rs.forEach(r=>m.set(r[key],(m.get(r[key])||0)+val(r)));return m};
 const ml=()=>S.m==='__n'?'Registros':S.m;
 
+const inBar={id:'inBar',afterDatasetsDraw(c){
+ const x=c.ctx,hz=c.options.indexAxis==='y',mut=getComputedStyle(document.documentElement).getPropertyValue('--mut').trim();
+ c.getDatasetMeta(0).data.forEach((b,i)=>{const v=c.data.datasets[0].data[i];if(!v)return;const t=fmt(v);
+  x.save();x.font='600 12px "Bricolage Grotesque",system-ui,sans-serif';x.textBaseline='middle';const w=x.measureText(t).width;
+  if(hz){if(b.x-b.base>w+14){x.fillStyle='#fff';x.textAlign='right';x.fillText(t,b.x-7,b.y)}else{x.fillStyle=mut;x.textAlign='left';x.fillText(t,b.x+5,b.y)}}
+  else{x.textAlign='center';if(b.base-b.y>22){x.fillStyle='#fff';x.fillText(t,b.x,b.y+12)}else{x.fillStyle=mut;x.fillText(t,b.x,b.y-9)}}
+  x.restore()})}};
 function mk(id,cfg){CH[id]&&CH[id].destroy();CH[id]=new Chart($('#'+id),cfg)}
 function render(){
  const rs=rows(),cs=getComputedStyle(document.documentElement),ink=cs.getPropertyValue('--mut').trim(),line=cs.getPropertyValue('--line').trim(),acc=cs.getPropertyValue('--acc').trim();
@@ -157,16 +172,16 @@ function render(){
  $('#kpis').innerHTML=kp.map(([l,v])=>`<div class="kpi"><small>${esc(l)}</small><strong>${fmt(v)}</strong></div>`).join('');
  // Tendencia
  if(D){const a=[...agg(rs,D)].sort((x,y)=>String(x[0]).localeCompare(String(y[0])));
-  mk('c1',{type:'bar',data:{labels:a.map(x=>x[0]),datasets:[{label:ml(),data:a.map(x=>x[1]),backgroundColor:acc,borderRadius:6}]},
-   options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{grid:{color:line},beginAtZero:true}},onClick:(e,el)=>{if(el.length){const d=a[el[0].index][0];S.from=S.to=d;$('#from').value=$('#to').value=d;render()}}}})}
+  mk('c1',{type:'bar',plugins:[inBar],data:{labels:a.map(x=>x[0]),datasets:[{label:ml(),data:a.map(x=>x[1]),backgroundColor:acc,borderRadius:6}]},
+   options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{grid:{display:false}},y:{grid:{color:line},beginAtZero:true},},onClick:(e,el)=>{if(el.length){const d=a[el[0].index][0];S.from=S.to=d;$('#from').value=$('#to').value=d;render()}}}})}
  // Dona
  const top=(key,n)=>{const a=[...agg(rs,key)].sort((x,y)=>y[1]-x[1]);if(a.length<=n)return a;const r=a.slice(n).reduce((s,x)=>s+x[1],0);return[...a.slice(0,n),['Otros',r]]};
  const tg=(key)=>(e,el)=>{if(!el.length)return;const v=String(window.__lab[key][el[0].index]);if(v==='Otros')return;const cb=$(`details[data-k="${CSS.escape(key)}"] input[value="${CSS.escape(v)}"]`);if(cb){cb.checked=!cb.checked;cb.dispatchEvent(new Event('change',{bubbles:true}))}};
  window.__lab={};
  const d2=top(S.g2,8);window.__lab[S.g2]=d2.map(x=>x[0]);
- mk('c2',{type:'doughnut',data:{labels:d2.map(x=>x[0]),datasets:[{data:d2.map(x=>x[1]),backgroundColor:PAL,borderWidth:0}]},options:{maintainAspectRatio:false,cutout:'62%',plugins:{legend:{position:'right',labels:{boxWidth:10,usePointStyle:true}}},onClick:tg(S.g2)}});
+ mk('c2',{type:'doughnut',data:{labels:d2.map(x=>x[0]),datasets:[{data:d2.map(x=>x[1]),backgroundColor:PAL,borderWidth:0}]},options:{maintainAspectRatio:false,cutout:'62%',plugins:{legend:{position:'right',labels:{boxWidth:10,usePointStyle:true}},tooltip:{callbacks:{label:c=>{const t=c.dataset.data.reduce((a,b)=>a+b,0);return ' '+c.label+': '+fmt(c.parsed)+' ('+(t?(c.parsed/t*100).toFixed(1):0)+'%)'}}}},onClick:tg(S.g2)}});
  const d1=top(S.g1,12);window.__lab[S.g1]=d1.map(x=>x[0]);
- mk('c3',{type:'bar',data:{labels:d1.map(x=>x[0]),datasets:[{label:ml(),data:d1.map(x=>x[1]),backgroundColor:PAL[1],borderRadius:6}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:line},beginAtZero:true},y:{grid:{display:false}}},onClick:tg(S.g1)}});
+ mk('c3',{type:'bar',plugins:[inBar],data:{labels:d1.map(x=>x[0]),datasets:[{label:ml(),data:d1.map(x=>x[1]),backgroundColor:PAL[1],borderRadius:6}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{grid:{color:line},beginAtZero:true},y:{grid:{display:false}}},onClick:tg(S.g1)}});
  table(rs);
 }
 function table(rs){
@@ -190,6 +205,8 @@ document.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];f&&read(f)}
 // tema
 $('#theme').onclick=()=>{const r=document.documentElement,dark=r.dataset.theme==='dark'||(r.dataset.theme==='auto'&&matchMedia('(prefers-color-scheme:dark)').matches);r.dataset.theme=dark?'light':'dark';if(ALL.length)render()};
 document.addEventListener('click',e=>{document.querySelectorAll('details.f[open]').forEach(d=>{if(!d.contains(e.target))d.open=false})});
+// restaurar datos guardados
+try{const g=JSON.parse(localStorage.getItem(LS)||'null');if(g&&g.rows&&g.rows.length){ALL=g.rows;init(g.name)}}catch(_){}
 </script>
 </body>
 </html>
